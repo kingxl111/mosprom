@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:13.3
+    container_name: auth-db
+    env_file:
+      - ".env"
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${DATABASE_NAME}
+    ports:
+      - "${DATABASE_PORT}:${DATABASE_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c 'pg_isready -U user -d auth'"]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+  migrator:
+    container_name: auth-db-migrator
+    env_file:
+      - ".env"
+    build:
+      context: .
+      dockerfile: migrator.Dockerfile
+    depends_on:
+      - db
+    restart: on-failure
+    networks:
+      - internal
+networks:
+  internal:

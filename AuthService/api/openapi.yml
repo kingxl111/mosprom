@@ -1,0 +1,259 @@
+openapi: 3.0.0
+info:
+  title: Auth Service API
+  version: 1.0.0
+  description: >
+    Сервис аутентификации и авторизации для промышленного портала.
+    Поддерживает регистрацию, вход, обновление токенов, получение информации о пользователе.
+    Используется в составе системы сбора и анализа данных предприятий Москвы.
+
+servers:
+  - url: http://localhost:8081
+    description: Local Development
+  - url: https://auth.mosprom-hackathon.ru
+    description: Production Server
+
+security:
+  - BearerAuth: []
+
+paths:
+  /api/v1/auth/register:
+    post:
+      summary: Регистрация нового пользователя (компании или администратора)
+      description: Создает нового пользователя и возвращает JWT токен.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Успешная регистрация.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Неверные данные запроса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Пользователь с таким email уже существует.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/login:
+    post:
+      summary: Аутентификация пользователя и получение токенов
+      description: Проверяет учетные данные и возвращает JWT access/refresh токены.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешная аутентификация.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          description: Неверные данные запроса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Неверный логин или пароль.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/refresh:
+    post:
+      summary: Обновление access токена
+      description: Принимает refresh токен и выдает новую пару токенов.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Новый токен успешно выдан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          description: Недействительный или просроченный refresh токен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/auth/logout:
+    post:
+      summary: Выход из системы
+      security:
+        - BearerAuth: []
+      description: Инвалидирует refresh токен пользователя (удаляет из Redis blacklist).
+      responses:
+        '204':
+          description: Успешный выход, токен аннулирован.
+        '401':
+          description: Пользователь не авторизован.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/users/me:
+    get:
+      summary: Получение информации о текущем пользователе
+      description: Возвращает email, роль и дату регистрации текущего пользователя.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Информация о пользователе успешно получена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '401':
+          description: Неавторизованный доступ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Внутренняя ошибка сервера.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - role
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email пользователя.
+        password:
+          type: string
+          format: password
+          description: Пароль пользователя.
+        role:
+          type: string
+          enum: [company, admin, analyst]
+          description: Роль пользователя в системе.
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          description: Email пользователя.
+        password:
+          type: string
+          format: password
+          description: Пароль пользователя.
+
+    RefreshRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: Refresh токен для обновления access токена.
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access токен.
+        refresh_token:
+          type: string
+          description: JWT refresh токен.
+        expires_in:
+          type: integer
+          description: Время жизни access токена в секундах.
+
+    UserInfoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Уникальный идентификатор пользователя.
+        email:
+          type: string
+          format: email
+          description: Email пользователя.
+        role:
+          type: string
+          enum: [company, admin, analyst]
+          description: Роль пользователя.
+        created_at:
+          type: string
+          format: date-time
+          description: Дата регистрации пользователя.
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Описание ошибки.
