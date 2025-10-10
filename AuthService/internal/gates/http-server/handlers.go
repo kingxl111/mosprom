@@ -1,1 +1,181 @@
 package http_server
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	httpPack "github.com/kingxl111/mosprom/AuthService/internal/environment"
+	models "github.com/kingxl111/mosprom/AuthService/internal/user"
+	"github.com/kingxl111/mosprom/AuthService/internal/user/service"
+	api "github.com/kingxl111/mosprom/AuthService/pkg/api/auth"
+	"log/slog"
+	"net/http"
+)
+
+var _ api.ServerInterface = (*Handler)(nil)
+
+type Handler struct {
+	svc    *service.AuthService
+	logger *slog.Logger
+}
+
+func NewHandler(svc *service.AuthService, logger *slog.Logger) *Handler {
+	return &Handler{
+		svc:    svc,
+		logger: logger,
+	}
+}
+
+func (h *Handler) PostApiV1AuthRegister(w http.ResponseWriter, r *http.Request) {
+	var req api.RegisterRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json: %w", err))
+		return
+	}
+
+	resp, err := h.svc.Register(r.Context(), &models.RegisterRequest{
+		Email:    string(req.Email),
+		Password: req.Password,
+		Role:     string(req.Role),
+	})
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, api.AuthResponse{
+		AccessToken:  &resp.AccessToken,
+		RefreshToken: &resp.RefreshToken,
+	})
+}
+
+func (h *Handler) PostApiV1AuthLogin(w http.ResponseWriter, r *http.Request) {
+	var req api.LoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json: %w", err))
+		return
+	}
+
+	ip := r.RemoteAddr
+	userAgent := r.UserAgent()
+
+	resp, err := h.svc.Login(r.Context(), &models.LoginRequest{
+		Email:     string(req.Email),
+		Password:  req.Password,
+		IP:        ip,
+		UserAgent: userAgent,
+	})
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, api.AuthResponse{
+		AccessToken:  &resp.AccessToken,
+		RefreshToken: &resp.RefreshToken,
+	})
+}
+
+func (h *Handler) PostApiV1AuthRefresh(w http.ResponseWriter, r *http.Request) {
+	var req api.RefreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json: %w", err))
+		return
+	}
+
+	resp, err := h.svc.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, api.AuthResponse{
+		AccessToken: &resp.AccessToken,
+	})
+}
+
+func (h *Handler) PostApiV1AuthLogout(w http.ResponseWriter, r *http.Request) {
+	type logoutReq struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+
+	var req logoutReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json: %w", err))
+		return
+	}
+
+	if err := h.svc.Logout(r.Context(), req.RefreshToken); err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+func (h *Handler) GetApiV1UsersMe(w http.ResponseWriter, r *http.Request) {
+	uidVal := r.Context().Value(httpPack.ContextUserIDKey)
+	if uidVal == nil {
+		h.writeError(w, http.StatusUnauthorized, fmt.Errorf("missing user id in context"))
+		return
+	}
+
+	// contexte stores int
+	userID, ok := uidVal.(int)
+	if !ok {
+		// maybe it was stored as float64 (json) — try convert if needed
+		// but better to ensure middleware stores int
+		h.writeError(w, http.StatusInternalServerError, fmt.Errorf("invalid user id type in context"))
+		return
+	}
+
+	userResp, err := h.svc.GetUserByID(r.Context(), userID)
+	if err != nil {
+		h.handleServiceError(w, err)
+		return
+	}
+
+	resp := api.UserInfoResponse{
+		Id:        strPtr(userResp.ID),
+		Email:     (*api.Email)(&userResp.Email),
+		Role:      (*api.UserInfoResponseRole)(&userResp.Role),
+		CreatedAt: &userResp.CreatedAt,
+	}
+
+	h.writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
+	h.logger.Error("service error", "err", err)
+
+	switch {
+	case errors.Is(err, service.ErrInvalidCredentials):
+		h.writeError(w, http.StatusUnauthorized, err)
+	case errors.Is(err, service.ErrUserExists):
+		h.writeError(w, http.StatusConflict, err)
+	case errors.Is(err, service.ErrTokenExpired):
+		h.writeError(w, http.StatusUnauthorized, err)
+	default:
+		h.writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
+func (h *Handler) writeError(w http.ResponseWriter, status int, err error) {
+	msg := err.Error()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	resp := api.ErrorResponse{Error: &msg}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		h.logger.Error("encode json", "err", err)
+	}
+}
+
+func strPtr(s string) *string {
+	return &s
+}

@@ -3,14 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
-	repo "github.com/kingxl111/mosprom/AuthService/internal/repository/postgres"
+	repo "github.com/kingxl111/mosprom/AuthService/internal/repository"
+	pg "github.com/kingxl111/mosprom/AuthService/internal/repository/postgres"
+	models "github.com/kingxl111/mosprom/AuthService/internal/user"
 	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/redis/go-redis/v9"
 )
 
-// AuthService описывает основной сервис авторизации
 type AuthService struct {
 	repo  Repository
 	redis *redis.Client
@@ -23,10 +24,10 @@ func NewAuthService(repo Repository, redis *redis.Client) *AuthService {
 	}
 }
 
-func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*AuthResponse, error) {
+func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest) (*models.AuthResponse, error) {
 	// Проверяем, что пользователя нет
 	user, err := s.repo.GetUserByEmail(ctx, req.Email)
-	if err != nil && !errors.Is(err, repo.ErrNotFound) {
+	if err != nil && !errors.Is(err, repo.ErrorUserNotFound) {
 		return nil, fmt.Errorf("get user by email: %w", err)
 	}
 
@@ -35,7 +36,7 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Auth
 	}
 
 	passwordHash := generatePasswordHash(req.Password)
-	newUser := &postgres.User{
+	newUser := &pg.User{
 		Email:        req.Email,
 		PasswordHash: passwordHash,
 		Role:         req.Role,
@@ -48,13 +49,13 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Auth
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	access, err := GenerateAccessToken(newUser.ID, newUser.Email)
+	access, err := GenerateToken(newUser.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
 	refresh := generateRandomString(64)
-	token := &postgres.RefreshToken{
+	token := &pg.RefreshToken{
 		UserID:    newUser.ID,
 		Token:     refresh,
 		ExpiresAt: time.Now().Add(24 * time.Hour),
@@ -68,16 +69,16 @@ func (s *AuthService) Register(ctx context.Context, req *RegisterRequest) (*Auth
 		s.redis.Set(ctx, fmt.Sprintf("refresh:%s", refresh), newUser.ID, 24*time.Hour)
 	}
 
-	return &AuthResponse{
+	return &models.AuthResponse{
 		AccessToken:  access,
 		RefreshToken: refresh,
 	}, nil
 }
 
-func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, error) {
+func (s *AuthService) Login(ctx context.Context, req *models.LoginRequest) (*models.AuthResponse, error) {
 	user, err := s.repo.GetUserByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
+		if errors.Is(err, repo.ErrorUserNotFound) {
 			return nil, fmt.Errorf("invalid credentials")
 		}
 		return nil, fmt.Errorf("get user: %w", err)
@@ -91,13 +92,13 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (*AuthRespon
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	access, err := GenerateAccessToken(user.ID, user.Email)
+	access, err := GenerateToken(user.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
 	refresh := generateRandomString(64)
-	refreshToken := &postgres.RefreshToken{
+	refreshToken := &pg.RefreshToken{
 		UserID:    user.ID,
 		Token:     refresh,
 		ExpiresAt: time.Now().Add(24 * time.Hour),
@@ -107,7 +108,7 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (*AuthRespon
 		return nil, fmt.Errorf("save refresh token: %w", err)
 	}
 
-	session := &postgres.UserSession{
+	session := &pg.UserSession{
 		UserID:       user.ID,
 		IPAddress:    req.IP,
 		UserAgent:    req.UserAgent,
@@ -123,53 +124,76 @@ func (s *AuthService) Login(ctx context.Context, req *LoginRequest) (*AuthRespon
 		s.redis.Set(ctx, fmt.Sprintf("refresh:%s", refresh), user.ID, 24*time.Hour)
 	}
 
-	return &AuthResponse{
+	return &models.AuthResponse{
 		AccessToken:  access,
 		RefreshToken: refresh,
 	}, nil
 }
-
-func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*TokenResponse, error) {
+func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*models.TokenResponse, error) {
 	if refreshToken == "" {
 		return nil, fmt.Errorf("empty refresh token")
 	}
 
-	// Проверка в Redis (если используется)
+	// Redis-кэш (опционально) — не заменяет проверку в БД
 	if s.redis != nil {
 		val, err := s.redis.Get(ctx, fmt.Sprintf("refresh:%s", refreshToken)).Result()
-		if err == redis.Nil {
-			// нет в кэше → проверяем в БД
-		} else if err != nil {
+		if err != nil && err != redis.Nil {
 			return nil, fmt.Errorf("redis get: %w", err)
-		} else if val == "" {
-			return nil, fmt.Errorf("invalid or expired refresh token")
 		}
+		// если val == "" и err == nil — скорее всего некорректный токен, но всё равно проверим БД
 	}
 
 	rt, err := s.repo.GetRefreshToken(ctx, refreshToken)
 	if err != nil {
-		if errors.Is(err, repo.ErrNotFound) {
+		if errors.Is(err, repo.ErrorNotFound) {
 			return nil, fmt.Errorf("invalid refresh token")
 		}
 		return nil, fmt.Errorf("get refresh token: %w", err)
 	}
 
-	if rt.Revoked || rt.ExpiresAt.Before(time.Now()) {
-		return nil, fmt.Errorf("refresh token expired or revoked")
+	if rt.Revoked {
+		return nil, fmt.Errorf("refresh token revoked")
+	}
+	if rt.ExpiresAt.Before(time.Now()) {
+		return nil, fmt.Errorf("refresh token expired")
 	}
 
-	user, err := s.repo.GetUserByEmail(ctx, rt.User.Email)
+	user, err := s.repo.GetUserByID(ctx, rt.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("get user: %w", err)
+		if errors.Is(err, repo.ErrorNotFound) {
+			return nil, fmt.Errorf("user for refresh token not found")
+		}
+		return nil, fmt.Errorf("get user by id: %w", err)
 	}
 
-	access, err := GenerateAccessToken(user.ID, user.Email)
+	access, err := GenerateToken(user.ID, user.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	return &TokenResponse{
+	// Optionally rotate refresh token:
+	// — можно (и рекомендуется) создавать новый refresh token, сохранить и аннулировать старый.
+	// Ниже — пример без ротации (если хочешь ротацию — скажу как вставить).
+	return &models.TokenResponse{
 		AccessToken: access,
+	}, nil
+}
+
+// GetUserByID просто обёртка для handler'ов
+func (s *AuthService) GetUserByID(ctx context.Context, id int) (*models.UserResponse, error) {
+	u, err := s.repo.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repo.ErrorNotFound) {
+			return nil, fmt.Errorf("user not found")
+		}
+		return nil, fmt.Errorf("get user by id: %w", err)
+	}
+
+	return &models.UserResponse{
+		ID:        fmt.Sprintf("%d", u.ID),
+		Email:     u.Email,
+		Role:      u.Role,
+		CreatedAt: u.CreatedAt,
 	}, nil
 }
 

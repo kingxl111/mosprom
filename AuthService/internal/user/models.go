@@ -1,5 +1,7 @@
 package user
 
+import "time"
+
 type RegisterRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
@@ -20,4 +22,20 @@ type AuthResponse struct {
 
 type TokenResponse struct {
 	AccessToken string `json:"access_token"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
+type UserResponse struct {
+	ID        int        `json:"id"`
+	Email     string     `json:"email"`
+	Role      string     `json:"role"`
+	CreatedAt time.Time  `json:"created_at"`
+	LastLogin *time.Time `json:"last_login,omitempty"`
+}
+
+type ErrorResponse struct {
+	Error string `json:"error"`
 }

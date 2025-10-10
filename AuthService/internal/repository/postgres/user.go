@@ -42,10 +42,6 @@ func NewRepository(db *DB) *repository {
 	return &repository{db: db}
 }
 
-//
-// USERS
-//
-
 func (r *repository) CreateUser(ctx context.Context, user *User) error {
 	builder := sq.Insert(usersTable).
 		Columns(emailColumn, passwordHashColumn, roleColumn, isActiveColumn, createdAtColumn, updatedAtColumn).
@@ -114,10 +110,6 @@ func (r *repository) UpdateLastLogin(ctx context.Context, userID int) error {
 	return nil
 }
 
-//
-// REFRESH TOKENS
-//
-
 func (r *repository) SaveRefreshToken(ctx context.Context, token *RefreshToken) error {
 	builder := sq.Insert(refreshTokensTable).
 		Columns(userIDColumn, tokenColumn, expiresAtColumn, revokedColumn, createdAtColumn).
@@ -155,10 +147,6 @@ func (r *repository) RevokeRefreshToken(ctx context.Context, token string) error
 	return nil
 }
 
-//
-// SESSIONS
-//
-
 func (r *repository) CreateSession(ctx context.Context, s *UserSession) error {
 	builder := sq.Insert(userSessionsTable).
 		Columns(userIDColumn, ipAddressColumn, userAgentColumn, createdAtColumn, lastActivityColumn).
@@ -194,4 +182,60 @@ func (r *repository) UpdateSessionActivity(ctx context.Context, sessionID int) e
 		return repo.ErrorUpdateSession
 	}
 	return nil
+}
+
+func (r *repository) GetRefreshToken(ctx context.Context, token string) (*RefreshToken, error) {
+	builder := sq.Select(
+		idColumn,
+		userIDColumn,
+		tokenColumn,
+		expiresAtColumn,
+		revokedColumn,
+		createdAtColumn,
+	).
+		From(refreshTokensTable).
+		Where(sq.Eq{tokenColumn: token}).
+		PlaceholderFormat(sq.Dollar)
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, repo.ErrorBuildSelectQuery
+	}
+
+	row := r.db.pool.QueryRow(ctx, query, args...)
+	var rt RefreshToken
+	err = row.Scan(&rt.ID, &rt.UserID, &rt.Token, &rt.ExpiresAt, &rt.Revoked, &rt.CreatedAt)
+	if err != nil {
+		return nil, repo.ErrorNotFound
+	}
+	return &rt, nil
+}
+
+func (r *repository) GetUserByID(ctx context.Context, id int) (*User, error) {
+	builder := sq.Select(
+		idColumn,
+		emailColumn,
+		passwordHashColumn,
+		roleColumn,
+		isActiveColumn,
+		createdAtColumn,
+		updatedAtColumn,
+		lastLoginColumn,
+	).
+		From(usersTable).
+		Where(sq.Eq{idColumn: id}).
+		PlaceholderFormat(sq.Dollar)
+
+	query, args, err := builder.ToSql()
+	if err != nil {
+		return nil, repo.ErrorBuildSelectQuery
+	}
+
+	row := r.db.pool.QueryRow(ctx, query, args...)
+	var u User
+	err = row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.LastLogin)
+	if err != nil {
+		return nil, repo.ErrorNotFound
+	}
+	return &u, nil
 }

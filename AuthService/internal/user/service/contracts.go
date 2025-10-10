@@ -10,10 +10,12 @@ type (
 	UserRepository interface {
 		CreateUser(ctx context.Context, user *postgres.User) error
 		GetUserByEmail(ctx context.Context, email string) (*postgres.User, error)
+		GetUserByID(ctx context.Context, id int) (*postgres.User, error) // <- added
 		UpdateLastLogin(ctx context.Context, userID int) error
 	}
 	TokenRepository interface {
 		SaveRefreshToken(ctx context.Context, token *postgres.RefreshToken) error
+		GetRefreshToken(ctx context.Context, token string) (*postgres.RefreshToken, error) // <- added
 		RevokeRefreshToken(ctx context.Context, token string) error
 	}
 	SessionRepository interface {

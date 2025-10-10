@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"github.com/kingxl111/mosprom/AuthService/internal/user/service"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/kingxl111/merch-store/internal/users/service"
 )
 
 const UsernameContextKey = "username"
@@ -147,9 +147,17 @@ func (o *ServerOptions) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+type contextKey string
+
+const (
+	ContextUserIDKey contextKey = "user_id"
+	ContextEmailKey  contextKey = "email"
+)
+
 func (o *ServerOptions) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.String(), "/api/auth") {
+		// Allow unauthenticated access to register/login/refresh/logout endpoints
+		if strings.HasPrefix(r.URL.Path, "/api/v1/auth") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -161,17 +169,18 @@ func (o *ServerOptions) authMiddleware(next http.Handler) http.Handler {
 		}
 
 		token := strings.TrimPrefix(authHeader, "Bearer ")
-		username, err := service.ParseToken(token)
+		claims, err := service.ParseToken(token)
 		if err != nil {
+			o.logger.Error("invalid token", "err", err)
 			http.Error(w, "invalid token", http.StatusUnauthorized)
 			return
 		}
 
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, UsernameContextKey, username)
-		o.logger.Info("user: " + ctx.Value(UsernameContextKey).(string))
-		r = r.WithContext(ctx)
+		ctx = context.WithValue(ctx, ContextUserIDKey, claims.UserID)
+		ctx = context.WithValue(ctx, ContextEmailKey, claims.Email)
+		o.logger.Info("authenticated user", "user_id", claims.UserID, "email", claims.Email)
 
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

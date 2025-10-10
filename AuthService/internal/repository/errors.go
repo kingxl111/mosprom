@@ -13,4 +13,5 @@ var (
 	ErrorUpdateToken      = errors.New("failed to update refresh token")
 	ErrorUpdateSession    = errors.New("failed to update session")
 	ErrorUserNotFound     = errors.New("user not found")
+	ErrorNotFound         = errors.New("not found")
 )
