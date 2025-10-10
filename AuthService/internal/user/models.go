@@ -1,24 +1,23 @@
 package user
 
-import "time"
-
-type User struct {
-	ID        int
-	Email     string
-	Role      string
-	IsActive  bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	LastLogin *time.Time
+type RegisterRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
 }
 
-type Credentials struct {
-	Email    string
-	Password string
+type LoginRequest struct {
+	Email     string `json:"email"`
+	Password  string `json:"password"`
+	IP        string `json:"ip,omitempty"`
+	UserAgent string `json:"user_agent,omitempty"`
 }
 
-type AuthTokens struct {
-	AccessToken  string
-	RefreshToken string
-	ExpiresIn    int64
+type AuthResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+}
+
+type TokenResponse struct {
+	AccessToken string `json:"access_token"`
 }
