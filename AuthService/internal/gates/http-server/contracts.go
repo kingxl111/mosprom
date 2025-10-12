@@ -12,4 +12,5 @@ type AuthService interface {
 	Login(ctx context.Context, req *service.LoginRequest) (*service.AuthResponse, error)
 	Refresh(ctx context.Context, token string) (*service.TokenResponse, error)
 	Logout(ctx context.Context, token string) error
+	GetUserByID(ctx context.Context, id int) (*service.UserResponse, error)
 }

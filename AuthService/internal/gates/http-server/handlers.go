@@ -4,23 +4,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	httpPack "github.com/kingxl111/mosprom/AuthService/internal/environment"
-	models "github.com/kingxl111/mosprom/AuthService/internal/user"
-	"github.com/kingxl111/mosprom/AuthService/internal/user/service"
-	api "github.com/kingxl111/mosprom/AuthService/pkg/api/auth"
-	"github.com/oapi-codegen/runtime/types"
 	"log/slog"
 	"net/http"
+
+	httpPack "github.com/kingxl111/mosprom/AuthService/internal/environment"
+	models "github.com/kingxl111/mosprom/AuthService/internal/user"
+	api "github.com/kingxl111/mosprom/AuthService/pkg/api/auth"
+	"github.com/oapi-codegen/runtime/types"
 )
 
 var _ api.ServerInterface = (*Handler)(nil)
 
 type Handler struct {
-	svc    *service.AuthService
+	svc    AuthService
 	logger *slog.Logger
 }
 
-func NewHandler(svc *service.AuthService, logger *slog.Logger) *Handler {
+func NewHandler(svc AuthService, logger *slog.Logger) *Handler {
 	return &Handler{
 		svc:    svc,
 		logger: logger,
