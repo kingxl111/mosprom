@@ -8,6 +8,7 @@ import (
 	models "github.com/kingxl111/mosprom/AuthService/internal/user"
 	"github.com/kingxl111/mosprom/AuthService/internal/user/service"
 	api "github.com/kingxl111/mosprom/AuthService/pkg/api/auth"
+	"github.com/oapi-codegen/runtime/types"
 	"log/slog"
 	"net/http"
 )
@@ -33,6 +34,23 @@ func (h *Handler) PostApiV1AuthRegister(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Валидация входных данных
+	if req.Email == "" || req.Password == "" || req.Role == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("email, password and role are required"))
+		return
+	}
+
+	if len(req.Password) < 8 {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("password must be at least 8 characters"))
+		return
+	}
+
+	validRoles := map[string]bool{"company": true, "admin": true, "analyst": true}
+	if !validRoles[string(req.Role)] {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid role"))
+		return
+	}
+
 	resp, err := h.svc.Register(r.Context(), &models.RegisterRequest{
 		Email:    string(req.Email),
 		Password: req.Password,
@@ -53,6 +71,12 @@ func (h *Handler) PostApiV1AuthLogin(w http.ResponseWriter, r *http.Request) {
 	var req api.LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, fmt.Errorf("invalid json: %w", err))
+		return
+	}
+
+	// Валидация входных данных
+	if req.Email == "" || req.Password == "" {
+		h.writeError(w, http.StatusBadRequest, fmt.Errorf("email and password are required"))
 		return
 	}
 
@@ -134,10 +158,12 @@ func (h *Handler) GetApiV1UsersMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	email := types.Email(userResp.Email)
+	role := api.UserInfoResponseRole(userResp.Role)
 	resp := api.UserInfoResponse{
-		Id:        strPtr(userResp.ID),
-		Email:     (*api.Email)(&userResp.Email),
-		Role:      (*api.UserInfoResponseRole)(&userResp.Role),
+		Id:        strPtr(fmt.Sprintf("%d", userResp.ID)),
+		Email:     &email,
+		Role:      &role,
 		CreatedAt: &userResp.CreatedAt,
 	}
 
@@ -148,11 +174,11 @@ func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
 	h.logger.Error("service error", "err", err)
 
 	switch {
-	case errors.Is(err, service.ErrInvalidCredentials):
+	case errors.Is(err, models.ErrInvalidCredentials):
 		h.writeError(w, http.StatusUnauthorized, err)
-	case errors.Is(err, service.ErrUserExists):
+	case errors.Is(err, models.ErrUserExists):
 		h.writeError(w, http.StatusConflict, err)
-	case errors.Is(err, service.ErrTokenExpired):
+	case errors.Is(err, models.ErrTokenExpired):
 		h.writeError(w, http.StatusUnauthorized, err)
 	default:
 		h.writeError(w, http.StatusInternalServerError, err)

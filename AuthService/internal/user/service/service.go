@@ -9,18 +9,15 @@ import (
 	"time"
 
 	"github.com/go-faster/errors"
-	"github.com/redis/go-redis/v9"
 )
 
 type AuthService struct {
-	repo  Repository
-	redis *redis.Client
+	repo Repository
 }
 
-func NewAuthService(repo Repository, redis *redis.Client) *AuthService {
+func NewAuthService(repo Repository) *AuthService {
 	return &AuthService{
-		repo:  repo,
-		redis: redis,
+		repo: repo,
 	}
 }
 
@@ -35,7 +32,10 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 		return nil, fmt.Errorf("user with email %s already exists", req.Email)
 	}
 
-	passwordHash := generatePasswordHash(req.Password)
+	passwordHash, err := generatePasswordHash(req.Password)
+	if err != nil {
+		return nil, fmt.Errorf("hash password: %w", err)
+	}
 	newUser := &pg.User{
 		Email:        req.Email,
 		PasswordHash: passwordHash,
@@ -49,12 +49,15 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 		return nil, fmt.Errorf("create user: %w", err)
 	}
 
-	access, err := GenerateToken(newUser.Email)
+	access, err := GenerateToken(newUser.ID, newUser.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refresh := generateRandomString(64)
+	refresh, err := generateRandomString(64)
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
 	token := &pg.RefreshToken{
 		UserID:    newUser.ID,
 		Token:     refresh,
@@ -63,10 +66,6 @@ func (s *AuthService) Register(ctx context.Context, req *models.RegisterRequest)
 
 	if err := s.repo.SaveRefreshToken(ctx, token); err != nil {
 		return nil, fmt.Errorf("save refresh token: %w", err)
-	}
-
-	if s.redis != nil {
-		s.redis.Set(ctx, fmt.Sprintf("refresh:%s", refresh), newUser.ID, 24*time.Hour)
 	}
 
 	return &models.AuthResponse{
@@ -88,16 +87,19 @@ func (s *AuthService) Login(ctx context.Context, req *models.LoginRequest) (*mod
 		return nil, fmt.Errorf("user is inactive")
 	}
 
-	if user.PasswordHash != generatePasswordHash(req.Password) {
+	if !verifyPasswordHash(req.Password, user.PasswordHash) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	access, err := GenerateToken(user.Email)
+	access, err := GenerateToken(user.ID, user.Email)
 	if err != nil {
 		return nil, fmt.Errorf("generate access token: %w", err)
 	}
 
-	refresh := generateRandomString(64)
+	refresh, err := generateRandomString(64)
+	if err != nil {
+		return nil, fmt.Errorf("generate refresh token: %w", err)
+	}
 	refreshToken := &pg.RefreshToken{
 		UserID:    user.ID,
 		Token:     refresh,
@@ -120,10 +122,6 @@ func (s *AuthService) Login(ctx context.Context, req *models.LoginRequest) (*mod
 		fmt.Printf("create session failed: %v\n", err)
 	}
 
-	if s.redis != nil {
-		s.redis.Set(ctx, fmt.Sprintf("refresh:%s", refresh), user.ID, 24*time.Hour)
-	}
-
 	return &models.AuthResponse{
 		AccessToken:  access,
 		RefreshToken: refresh,
@@ -132,15 +130,6 @@ func (s *AuthService) Login(ctx context.Context, req *models.LoginRequest) (*mod
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*models.TokenResponse, error) {
 	if refreshToken == "" {
 		return nil, fmt.Errorf("empty refresh token")
-	}
-
-	// Redis-кэш (опционально) — не заменяет проверку в БД
-	if s.redis != nil {
-		val, err := s.redis.Get(ctx, fmt.Sprintf("refresh:%s", refreshToken)).Result()
-		if err != nil && err != redis.Nil {
-			return nil, fmt.Errorf("redis get: %w", err)
-		}
-		// если val == "" и err == nil — скорее всего некорректный токен, но всё равно проверим БД
 	}
 
 	rt, err := s.repo.GetRefreshToken(ctx, refreshToken)
@@ -173,7 +162,6 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*models
 
 	// Optionally rotate refresh token:
 	// — можно (и рекомендуется) создавать новый refresh token, сохранить и аннулировать старый.
-	// Ниже — пример без ротации (если хочешь ротацию — скажу как вставить).
 	return &models.TokenResponse{
 		AccessToken: access,
 	}, nil
@@ -190,7 +178,7 @@ func (s *AuthService) GetUserByID(ctx context.Context, id int) (*models.UserResp
 	}
 
 	return &models.UserResponse{
-		ID:        fmt.Sprintf("%d", u.ID),
+		ID:        u.ID,
 		Email:     u.Email,
 		Role:      u.Role,
 		CreatedAt: u.CreatedAt,
@@ -204,10 +192,6 @@ func (s *AuthService) Logout(ctx context.Context, refreshToken string) error {
 
 	if err := s.repo.RevokeRefreshToken(ctx, refreshToken); err != nil {
 		return fmt.Errorf("revoke refresh token: %w", err)
-	}
-
-	if s.redis != nil {
-		s.redis.Del(ctx, fmt.Sprintf("refresh:%s", refreshToken))
 	}
 
 	return nil

@@ -1,18 +1,17 @@
 package service
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
+	"crypto/rand"
 	"time"
 
 	"github.com/go-faster/errors"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/kingxl111/mosprom/AuthService/internal/config"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	salt       = "kqwemjksdnfhaksrmksvj283njwksdf"
-	signingKey = "821nci1nc1234ubcz,mszd2jcv1wd23"
-	tokenTTL   = time.Minute * 60 // 1 hour
+	tokenTTL = time.Minute * 60 // 1 hour
 )
 
 type tokenClaims struct {
@@ -21,11 +20,30 @@ type tokenClaims struct {
 	Email  string `json:"email"`
 }
 
-func generatePasswordHash(password string) string {
-	h := sha256.New()
-	h.Write([]byte(password))
-	sum := h.Sum([]byte(salt))
-	return hex.EncodeToString(sum)
+func generatePasswordHash(password string) (string, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hash), nil
+}
+
+func verifyPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
+}
+
+func generateRandomString(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+	for i := range b {
+		b[i] = charset[b[i]%byte(len(charset))]
+	}
+	return string(b), nil
 }
 
 func GenerateToken(userID int, email string) (string, error) {
@@ -39,7 +57,7 @@ func GenerateToken(userID int, email string) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(signingKey))
+	return token.SignedString([]byte(config.GetJWTSecret()))
 }
 
 func ParseToken(accessToken string) (*tokenClaims, error) {
@@ -47,7 +65,7 @@ func ParseToken(accessToken string) (*tokenClaims, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("invalid signing method")
 		}
-		return []byte(signingKey), nil
+		return []byte(config.GetJWTSecret()), nil
 	})
 	if err != nil {
 		return nil, err

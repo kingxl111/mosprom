@@ -1,4 +1,4 @@
-package server
+package main
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func runMain(ctx context.Context) error {
 	repo := postgres.NewRepository(db)
 
 	// Сервис авторизации
-	authService := service.NewAuthService(repo, logger)
+	authService := service.NewAuthService(repo)
 
 	// HTTP config
 	httpConfig, err := config.NewHTTPConfig()
@@ -89,7 +89,7 @@ func runMain(ctx context.Context) error {
 	}
 
 	// HTTP обработчики (API)
-	handler := httpserver.NewHandler(authService)
+	handler := httpserver.NewHandler(authService, logger)
 	mux := http.NewServeMux()
 	apiHandler := authapi.HandlerFromMux(handler, mux)
 
