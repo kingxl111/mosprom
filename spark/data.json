@@ -1,0 +1,7 @@
+[
+  {"technology": "Python", "score": 100},
+  {"technology": "Spark", "score": 200},
+  {"technology": "Docker", "score": 150},
+  {"technology": "Kafka", "score": 180},
+  {"technology": "MinIO", "score": 120}
+]
