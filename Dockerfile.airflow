@@ -1,0 +1,34 @@
+FROM apache/airflow:2.7.3
+
+USER root
+
+RUN apt-get update && \
+    apt-get install -y openjdk-11-jdk curl && \
+    apt-get clean
+
+ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+USER airflow
+
+RUN pip install --user pyspark==3.5.1
+
+USER root
+
+RUN mkdir -p /opt/spark/jars && \
+    curl -L https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar -o /opt/spark/jars/hadoop-aws-3.3.4.jar && \
+    curl -L https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar -o /opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar
+
+ENV SPARK_CLASSPATH="/opt/spark/jars/hadoop-aws-3.3.4.jar:/opt/spark/jars/aws-java-sdk-bundle-1.12.262.jar"
+
+RUN curl -L https://repo1.maven.org/maven2/com/clickhouse/spark/clickhouse-spark-runtime-3.5_2.12/0.8.1/clickhouse-spark-runtime-3.5_2.12-0.8.1.jar -o /opt/spark/jars/clickhouse-spark-runtime-3.5_2.12-0.8.1.jar && \
+    curl -L https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.6.3/clickhouse-jdbc-0.6.3-all.jar -o /opt/spark/jars/clickhouse-jdbc-0.6.3-all.jar
+
+ENV SPARK_CLASSPATH="$SPARK_CLASSPATH:/opt/spark/jars/clickhouse-spark-runtime-3.5_2.12-0.8.1.jar:/opt/spark/jars/clickhouse-jdbc-0.6.3-all.jar"
+
+USER airflow
+RUN pip uninstall -y apache-airflow-providers-openlineage
+
+RUN pip install --no-cache-dir apache-airflow-providers-apache-spark
+
+USER airflow

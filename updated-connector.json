@@ -1,0 +1,25 @@
+{
+  "name": "minio-s3-sink-connector-v2",
+  "config": {
+    "connector.class": "io.confluent.connect.s3.S3SinkConnector",
+    "tasks.max": "1",
+    "topics": "high-throughput-topic",
+    "s3.bucket.name": "test-bucket",
+    "s3.region": "us-east-1",
+    "store.url": "http://minio:9000",
+    "aws.access.key.id": "minioadmin",
+    "aws.secret.access.key": "minioadmin123",
+    "s3.path.style.access": "true",
+    "flush.size": "100",
+    "rotate.interval.ms": "60000",
+    "storage.class": "io.confluent.connect.s3.storage.S3Storage",
+    "format.class": "io.confluent.connect.s3.format.json.JsonFormat",
+    "partitioner.class": "io.confluent.connect.storage.partitioner.TimeBasedPartitioner",
+    "partition.duration.ms": "3600000",
+    "path.format": "'year='yyyy'/month='MM'/day='dd",
+    "locale": "en",
+    "timezone": "UTC",
+    "timestamp.extractor": "Record",
+    "schema.compatibility": "NONE"
+  }
+}
