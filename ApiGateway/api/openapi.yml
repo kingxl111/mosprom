@@ -1,0 +1,945 @@
+openapi: 3.0.0
+info:
+  title: Moscow Industrial Data Platform API
+  version: 1.0.0
+  description: >
+    Единый API Gateway для системы сбора, консолидации и анализа данных 
+    промышленных предприятий Москвы. Обеспечивает аутентификацию, загрузку 
+    данных, отслеживание обработки и получение аналитических отчетов.
+    
+    Система разработана для Департамента инвестиционной и промышленной 
+    политики города Москвы в рамках хакатона «Открой#Моспром».
+
+  contact:
+    name: Moscow Industrial Platform Team
+    email: support@mosprom-hackathon.ru
+
+  license:
+    name: Proprietary
+    url: https://mosprom-hackathon.ru/license
+
+servers:
+  - url: http://localhost:8080
+    description: Local Development
+  - url: https://api.mosprom-hackathon.ru
+    description: Production Server
+  - url: https://staging-api.mosprom-hackathon.ru
+    description: Staging Server
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== Аутентификация и авторизация ====================
+  /api/v1/auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Регистрация нового пользователя (компании или администратора)
+      description: >
+        Создает нового пользователя в системе. Поддерживает регистрацию 
+        промышленных предприятий, администраторов и аналитиков.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Успешная регистрация.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Аутентификация пользователя и получение токенов
+      description: Проверяет учетные данные и возвращает JWT access/refresh токены.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешная аутентификация.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Обновление access токена
+      description: Принимает refresh токен и выдает новую пару токенов.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Новый токен успешно выдан.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Выход из системы
+      description: Инвалидирует refresh токен пользователя.
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Успешный выход, токен аннулирован.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== Управление пользователями ====================
+  /api/v1/users/me:
+    get:
+      tags:
+        - Users
+      summary: Получение информации о текущем пользователе
+      description: Возвращает email, роль и дату регистрации текущего пользователя.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Информация о пользователе успешно получена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/users/profile:
+    put:
+      tags:
+        - Users
+      summary: Обновление профиля пользователя
+      description: Обновляет информацию профиля пользователя.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Профиль успешно обновлен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserInfoResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== Управление файлами и данными ====================
+  /api/v1/files/upload:
+    post:
+      tags:
+        - Files
+      summary: Загрузка файла с промышленными данными
+      description: >
+        Загружает файл с данными промышленного предприятия для последующей 
+        обработки в ETL системе. Поддерживаемые форматы: CSV, XLSX, JSON.
+        Максимальный размер файла: 100MB.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Файл с промышленными данными
+                description:
+                  type: string
+                  description: Описание файла и типа данных
+                data_type:
+                  type: string
+                  enum: [production, financial, energy, environmental, personnel]
+                  description: Тип загружаемых данных
+      responses:
+        '202':
+          description: Файл принят в обработку.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          description: Превышен максимальный размер файла
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/files:
+    get:
+      tags:
+        - Files
+      summary: Получение списка загруженных файлов
+      description: Возвращает список всех файлов, загруженных пользователем.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+          description: Номер страницы
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+          description: Количество элементов на странице
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [uploaded, processing, processed, failed]
+          description: Фильтр по статусу обработки
+      responses:
+        '200':
+          description: Список файлов успешно получен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/files/{file_id}:
+    get:
+      tags:
+        - Files
+      summary: Получение статуса обработки файла
+      description: Возвращает текущий статус и прогресс обработки файла.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID файла
+      responses:
+        '200':
+          description: Статус файла успешно получен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - Files
+      summary: Удаление файла и связанных данных
+      description: Удаляет файл и все связанные с ним данные из системы.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: file_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: UUID файла
+      responses:
+        '204':
+          description: Файл и данные успешно удалены.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== Аналитика и отчеты ====================
+  /api/v1/analytics/reports:
+    get:
+      tags:
+        - Analytics
+      summary: Получение списка доступных отчетов
+      description: Возвращает список сгенерированных отчетов для пользователя.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: report_type
+          in: query
+          schema:
+            type: string
+            enum: [production, financial, energy, environmental, comprehensive]
+      responses:
+        '200':
+          description: Список отчетов успешно получен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/analytics/reports/{report_id}:
+    get:
+      tags:
+        - Analytics
+      summary: Получение отчета
+      description: Возвращает сгенерированный отчет по идентификатору.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: report_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Отчет успешно получен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/analytics/reports/generate:
+    post:
+      tags:
+        - Analytics
+      summary: Генерация нового отчета
+      description: Запускает процесс генерации отчета на основе загруженных данных.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateReportRequest'
+      responses:
+        '202':
+          description: Запрос на генерацию отчета принят.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateReportResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ==================== Мониторинг и системная информация ====================
+  /api/v1/system/health:
+    get:
+      tags:
+        - System
+      summary: Проверка состояния системы
+      description: Возвращает статус работы всех компонентов системы.
+      responses:
+        '200':
+          description: Состояние системы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthCheckResponse'
+        '503':
+          description: Система недоступна
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/v1/system/metrics:
+    get:
+      tags:
+        - System
+      summary: Получение метрик системы
+      description: Возвращает метрики производительности системы.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Метрики системы
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemMetricsResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT токен, полученный при аутентификации
+
+  responses:
+    BadRequest:
+      description: Неверные данные запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Неавторизованный доступ
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Доступ запрещен
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Конфликт данных
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: Внутренняя ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    # ==================== Аутентификация ====================
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+        - role
+        - company_name
+      properties:
+        email:
+          type: string
+          format: email
+          example: "company@industrial.ru"
+          description: Email пользователя
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: "securePassword123"
+          description: Пароль пользователя (мин. 8 символов)
+        role:
+          type: string
+          enum: [company, admin, analyst]
+          example: "company"
+          description: Роль пользователя в системе
+        company_name:
+          type: string
+          example: "ООО 'Промышленный завод Москвы'"
+          description: Название компании
+        contact_person:
+          type: string
+          example: "Иванов Иван Иванович"
+          description: Контактное лицо
+        phone:
+          type: string
+          example: "+7 495 123-45-67"
+          description: Контактный телефон
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+          example: "company@industrial.ru"
+        password:
+          type: string
+          format: password
+          example: "securePassword123"
+
+    RefreshRequest:
+      type: object
+      required:
+        - refresh_token
+      properties:
+        refresh_token:
+          type: string
+          description: Refresh токен для обновления access токена
+
+    AuthResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: JWT access токен
+        refresh_token:
+          type: string
+          description: JWT refresh токен
+        expires_in:
+          type: integer
+          description: Время жизни access токена в секундах
+        token_type:
+          type: string
+          default: "Bearer"
+        user:
+          $ref: '#/components/schemas/UserInfoResponse'
+
+    # ==================== Пользователи ====================
+    UserInfoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор пользователя
+        email:
+          type: string
+          format: email
+          description: Email пользователя
+        role:
+          type: string
+          enum: [company, admin, analyst]
+          description: Роль пользователя
+        company_name:
+          type: string
+          description: Название компании
+        contact_person:
+          type: string
+          description: Контактное лицо
+        phone:
+          type: string
+          description: Контактный телефон
+        created_at:
+          type: string
+          format: date-time
+          description: Дата регистрации пользователя
+        updated_at:
+          type: string
+          format: date-time
+          description: Дата последнего обновления
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        company_name:
+          type: string
+          description: Название компании
+        contact_person:
+          type: string
+          description: Контактное лицо
+        phone:
+          type: string
+          description: Контактный телефон
+
+    # ==================== Файлы ====================
+    FileUploadResponse:
+      type: object
+      properties:
+        file_id:
+          type: string
+          format: uuid
+          description: Уникальный идентификатор файла
+        filename:
+          type: string
+          description: Имя загруженного файла
+        status:
+          type: string
+          enum: [uploaded, processing, processed, failed]
+          description: Статус обработки файла
+        message:
+          type: string
+          description: Сообщение о статусе
+        created_at:
+          type: string
+          format: date-time
+          description: Время загрузки файла
+        estimated_processing_time:
+          type: integer
+          description: Примерное время обработки в секундах
+
+    FileStatusResponse:
+      type: object
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        status:
+          type: string
+          enum: [uploaded, processing, processed, failed]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Прогресс обработки в процентах
+        message:
+          type: string
+          description: Детальное сообщение о статусе
+        error_details:
+          type: string
+          description: Детали ошибки (если статус failed)
+        result_url:
+          type: string
+          format: uri
+          description: Ссылка на обработанные данные (если статус processed)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+          description: Время завершения обработки
+
+    FileListResponse:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    FileItem:
+      type: object
+      properties:
+        file_id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        size:
+          type: integer
+          description: Размер файла в байтах
+        status:
+          type: string
+          enum: [uploaded, processing, processed, failed]
+        data_type:
+          type: string
+          description: Тип данных в файле
+        created_at:
+          type: string
+          format: date-time
+        processed_at:
+          type: string
+          format: date-time
+
+    # ==================== Аналитика и отчеты ====================
+    GenerateReportRequest:
+      type: object
+      required:
+        - report_type
+        - time_range
+      properties:
+        report_type:
+          type: string
+          enum: [production, financial, energy, environmental, comprehensive]
+          description: Тип отчета
+        time_range:
+          $ref: '#/components/schemas/TimeRange'
+        filters:
+          type: object
+          description: Дополнительные фильтры для отчета
+        format:
+          type: string
+          enum: [pdf, excel, json]
+          default: "pdf"
+          description: Формат отчета
+
+    GenerateReportResponse:
+      type: object
+      properties:
+        report_id:
+          type: string
+          format: uuid
+          description: Идентификатор задачи генерации отчета
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+        estimated_completion_time:
+          type: integer
+          description: Примерное время выполнения в секундах
+        message:
+          type: string
+          description: Сообщение о статусе
+
+    ReportListResponse:
+      type: object
+      properties:
+        reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportItem'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    ReportItem:
+      type: object
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        report_type:
+          type: string
+        report_name:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        time_range:
+          $ref: '#/components/schemas/TimeRange'
+        file_size:
+          type: integer
+          description: Размер файла отчета в байтах
+        download_url:
+          type: string
+          format: uri
+          description: Ссылка для скачивания отчета
+
+    ReportResponse:
+      type: object
+      properties:
+        report_id:
+          type: string
+          format: uuid
+        report_type:
+          type: string
+        report_name:
+          type: string
+        generated_at:
+          type: string
+          format: date-time
+        time_range:
+          $ref: '#/components/schemas/TimeRange'
+        summary:
+          type: object
+          description: Сводка отчета
+        data:
+          type: object
+          description: Данные отчета
+        download_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+          description: Время, после которого ссылка станет недействительной
+
+    # ==================== Системные схемы ====================
+    HealthCheckResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        components:
+          type: object
+          properties:
+            api_gateway:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            auth_service:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            kafka:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            redis:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            postgres:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+            clickhouse:
+              type: string
+              enum: [healthy, degraded, unhealthy]
+        version:
+          type: string
+          description: Версия API
+
+    SystemMetricsResponse:
+      type: object
+      properties:
+        goroutines:
+          type: integer
+          description: Количество активных горутин
+        memory_usage_mb:
+          type: number
+          format: float
+          description: Использование памяти в MB
+        active_connections:
+          type: integer
+          description: Количество активных соединений
+        requests_per_second:
+          type: number
+          format: float
+          description: Запросов в секунду
+        uptime_seconds:
+          type: integer
+          description: Время работы системы в секундах
+        kafka_messages_processed:
+          type: integer
+          description: Количество обработанных сообщений Kafka
+
+    TimeRange:
+      type: object
+      required:
+        - start_date
+        - end_date
+      properties:
+        start_date:
+          type: string
+          format: date
+          description: Начальная дата периода
+        end_date:
+          type: string
+          format: date
+          description: Конечная дата периода
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          description: Текущая страница
+        limit:
+          type: integer
+          description: Количество элементов на странице
+        total:
+          type: integer
+          description: Общее количество элементов
+        total_pages:
+          type: integer
+          description: Общее количество страниц
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Код ошибки
+        message:
+          type: string
+          description: Человеко-читаемое описание ошибки
+        details:
+          type: object
+          description: Дополнительные детали ошибки
+        timestamp:
+          type: string
+          format: date-time
+        request_id:
+          type: string
+          description: Идентификатор запроса для трассировки

@@ -15,6 +15,11 @@ const (
 	kafkaGroupIDEnvName         = "KAFKA_GROUP_ID"
 	kafkaWorkersEnvName         = "KAFKA_WORKERS"
 	kafkaConsumerTimeoutEnvName = "KAFKA_CONSUMER_TIMEOUT"
+
+	kafkaFileUploadTopicEnvName    = "KAFKA_FILE_UPLOAD_TOPIC"
+	kafkaFileProcessedTopicEnvName = "KAFKA_FILE_PROCESSED_TOPIC"
+	kafkaBatchSizeEnvName          = "KAFKA_BATCH_SIZE"
+	kafkaLingerMsEnvName           = "KAFKA_LINGER_MS"
 )
 
 type KafkaConfig interface {
@@ -23,6 +28,11 @@ type KafkaConfig interface {
 	GroupID() string
 	Workers() int
 	ConsumerTimeout() int
+
+	FileUploadTopic() string
+	FileProcessedTopic() string
+	BatchSize() int
+	LingerMs() int
 }
 
 type kafkaConfig struct {
@@ -31,6 +41,11 @@ type kafkaConfig struct {
 	groupID         string
 	workers         int
 	consumerTimeout int
+
+	fileUploadTopic    string
+	fileProcessedTopic string
+	batchSize          int
+	lingerMs           int
 }
 
 func NewKafkaConfig() (KafkaConfig, error) {
@@ -74,12 +89,47 @@ func NewKafkaConfig() (KafkaConfig, error) {
 		}
 	}
 
+	fileUploadTopic := os.Getenv(kafkaFileUploadTopicEnvName)
+	if fileUploadTopic == "" {
+		fileUploadTopic = "file-upload-topic"
+	}
+
+	fileProcessedTopic := os.Getenv(kafkaFileProcessedTopicEnvName)
+	if fileProcessedTopic == "" {
+		fileProcessedTopic = "file-processed-topic"
+	}
+
+	batchSizeStr := os.Getenv(kafkaBatchSizeEnvName)
+	batchSize := 16384
+	if batchSizeStr != "" {
+		var err error
+		batchSize, err = strconv.Atoi(batchSizeStr)
+		if err != nil || batchSize <= 0 {
+			return nil, errors.New("invalid kafka batch size")
+		}
+	}
+
+	lingerMsStr := os.Getenv(kafkaLingerMsEnvName)
+	lingerMs := 20
+	if lingerMsStr != "" {
+		var err error
+		lingerMs, err = strconv.Atoi(lingerMsStr)
+		if err != nil || lingerMs < 0 {
+			return nil, errors.New("invalid kafka linger ms")
+		}
+	}
+
 	return &kafkaConfig{
 		brokers:         brokers,
 		topic:           topic,
 		groupID:         groupID,
 		workers:         workers,
 		consumerTimeout: timeout,
+
+		fileUploadTopic:    fileUploadTopic,
+		fileProcessedTopic: fileProcessedTopic,
+		batchSize:          batchSize,
+		lingerMs:           lingerMs,
 	}, nil
 }
 
@@ -101,4 +151,20 @@ func (cfg *kafkaConfig) Workers() int {
 
 func (cfg *kafkaConfig) ConsumerTimeout() int {
 	return cfg.consumerTimeout
+}
+
+func (cfg *kafkaConfig) FileUploadTopic() string {
+	return cfg.fileUploadTopic
+}
+
+func (cfg *kafkaConfig) FileProcessedTopic() string {
+	return cfg.fileProcessedTopic
+}
+
+func (cfg *kafkaConfig) BatchSize() int {
+	return cfg.batchSize
+}
+
+func (cfg *kafkaConfig) LingerMs() int {
+	return cfg.lingerMs
 }

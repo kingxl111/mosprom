@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/kingxl111/mosprom/ApiGateway/internal/fileprocessor"
 	"log/slog"
 	"net/http"
 	"os"
@@ -91,9 +92,25 @@ func runMain(ctx context.Context) error {
 
 	authProxy := proxy.NewAuthServiceProxy(authServiceConfig, logger)
 
-	// HTTP обработчики (API Gateway)
-	handler := httpserver.NewHandler(authProxy, redisClient, logger)
+	fileProcessor, err := fileprocessor.NewFileProcessor(kafkaConfig, redisClient, logger)
+	if err != nil {
+		return fmt.Errorf("file processor: %w", err)
+	}
+
+	handler := httpserver.NewHandler(fileProcessor, redisClient, logger)
 	mux := http.NewServeMux()
+
+	// Проксируем все запросы к AuthService
+	mux.Handle("/api/v1/auth/", http.StripPrefix("/api/v1/auth", authProxy.ProxyHandler()))
+
+	// Обработка файлов
+	mux.HandleFunc("/api/v1/files/upload", handler.UploadFile)
+	mux.HandleFunc("/api/v1/files/status/", handler.GetFileStatus)
+	mux.HandleFunc("/api/v1/files", handler.ListFiles)
+	mux.HandleFunc("/api/v1/files/", handler.DeleteFile)
+
+	// TODO: Добавить middleware для аутентификации
+	// authenticatedMux := authMiddleware(mux)
 
 	// Проксируем все запросы к AuthService
 	mux.Handle("/api/v1/auth/", http.StripPrefix("/api/v1/auth", authProxy.ProxyHandler()))
